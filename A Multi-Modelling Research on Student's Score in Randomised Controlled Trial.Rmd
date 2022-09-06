@@ -1,0 +1,177 @@
+---
+title: "A Multi-Modelling Research on Student's Score in Randomised Controlled Trial"
+author: "Z0171200"
+date: "March 25th 2022"
+output:
+  pdf_document: default
+bibliography: reference.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Educational Background of the Researched Question
+Randomised Controlled Trial (RCT) has been widely applied in the educational field as gold standard for testing efficiency of interventions, which assists researchers to classify what kind of educationally augmented elements used by tutors has stimulated students on learning knowledge, reflected by increasing academic achievements [@pmid23589806]. It is a form of comparative experiment which randomly assigns eligible participants into treatment and non-treatment groups, and then measures how both groups are influenced in terms of certain universal conditions through observations [@RePEc:mpr:mprres:8bb2ecd6a142422db269c1e0b9dec26f]. As the randomness in the real-world environment could not be eliminated, RCT reserves the stochastic attributes among the measured variables, which builds the statistic links among, collected inputs interventions, and outcomes through a rigorous and robust method [@https://doi.org/10.1111/aogs.13309]. Several educational scholars started their RCT research about the statistic connections between the estimated impacts of teacher’s hardworking and their pupil’s marks. Their exploratory analysis generally uses regression methods to evaluate the strength of the associations across multiple input and output variables, to validate whether the intermediary parameters have intervened the final results, like extra reading lists help time-flexible students get higher marks as they gain more information outside classroom [@doi:10.3102/1076998607307239]. Furthermore, multiple intermediates might impact student’s scores through constructing complicated levels or classes. For instance, the academic performance of pupils attending schools in affluent areas is probably different from their competitors living in poor areas, even though they are all taught by same tutors, so how to make sure the randomness within the levels needs to gain attentions during multilevel modelling [@Freytag2022].
+
+In this article, a multisite educational trial offered by Durham University [@durham_data], aiming at understanding the changes of students' scores in different schools at different times, which will be elaborated into two aspects: power of school mediator and intervention efficiency.
+
+```{r include=FALSE}
+# All packages would be used in this assignment are listed and described
+require(mice) # To check whether there are any missing values
+require(reshape2) # To create longitudinal data for comparing repeated data
+require(ggplot2) # To create visualization
+require(egg) # To combine multiple visualization
+require(lme4) # Use linear mixed-effect model
+require(sjPlot) # Visualise the random effect in level-2 model
+```
+# Explanatory Data Analysis
+Ashraf and Joshen (2022) offered an integrated database about a multisite educational experiment, containing 210 observations separated into seven variables, which includes Student's ID number, two intervening mediators and four time-series information. Categorical variables ‘School’ and ‘Intervention’ demonstrate that the student participants accepted treatment or non-treatment in different 54 schools. While continuous variables ‘Pretest’, ‘Posttest_time1’, ‘Posttest_time2’, ‘Posttest_time3’ depict that pupil’s marks wave throughout the time (abbr as time 0, time 1, time 2, time 3). Zero Not-a-Number value has been found in the table, implying that all information is valid and meaningful. To validate the relation among variables, a one-by-one scatterplot matrix is built that all time-series information are positively correlated, and time3 connects approximately linear with time4 (r=0.986), through Spearman correlation test since none of variables are normally distributed (see Fig.1-7). Therefore, long-tail effects could be noted in all four time data when their means are over their calculated medians, suggesting that a minority of highly-marked students raised the average scores of the whole (see Fig.8&9). However, the treatment efficiency is blurry under observation that the range of pupil majority (data inside interquartile range) fluctuates through the time while its competitors in controlled group raised steadily (see Fig.8&9). 
+
+```{r include=FALSE}
+MST=read.csv("https://www.maths.dur.ac.uk/users/jochen.einbeck/Data/mst1.csv", header=TRUE)
+attach(MST)
+# print all column names and observations
+colnames(MST)
+print(c('Sample Number is :',dim(MST)[1]*dim(MST)[2]))
+# To check whether there are any missing values inside the dataframe
+print(c('the number of non-value data :', sum(is.na(MST))))
+# To have a brief look about the variable distribution
+summary(MST)
+```
+
+```{r results='hide', echo=FALSE}
+# To check whether there are any missing values
+md.pattern(MST,plot=T,rotate.names = T)
+```
+
+```{r echo=FALSE}
+# try to find the one-by-one relationships among variables
+pairs(MST)
+# Try to find the covariance of four time-series data through sequence
+print (c('correlation between pretest and posttest 1 :',cor(Pretest,Posttest_Time1, method='spearman')))
+print (c('correlation between posttest 1 and posttest 2 :',cor(Posttest_Time1,Posttest_Time2, method='spearman')))
+print (c('correlation between posttest 2 and posttest 3 :',cor(Posttest_Time2,Posttest_Time3, method='spearman')))
+# To check whether the data columns are normally distributed
+a=ggplot(data=MST, aes(log(Pretest))) + geom_histogram(bins=15)+ggtitle('Fig.3 Score Distribution at Pre Time') + theme(plot.title = element_text(hjust = 0.5))
+b=ggplot(data=MST, aes(log(Posttest_Time1))) + geom_histogram(bins=15)+ggtitle('Fig.4 Score Distribution at Post Time 1') + theme(plot.title = element_text(hjust = 0.5))
+c=ggplot(data=MST, aes(Posttest_Time2)) + geom_histogram(bins=15)+ggtitle('Fig.5 Score Distribution at Post Time 2') + theme(plot.title = element_text(hjust = 0.5))
+d=ggplot(data=MST, aes(Posttest_Time3)) + geom_histogram(bins=15)+ggtitle('Fig.6 Score Distribution at Post Time 3') + theme(plot.title = element_text(hjust = 0.5))
+intevention=data.frame(table(MST$Intervention)) 
+colnames(intevention)=c("treatment", "frequency")
+e=ggplot(data=intevention, aes(x=factor(treatment,levels=c('0', '1'),labels=c('Control','Treatment')), y=frequency)) + geom_bar(stat="identity")+labs(x = "Intervention")+ggtitle('Fig.7 Score Distribution under Intervention') + theme(plot.title = element_text(hjust = 0.2))
+# Considered post time from one to three and pre time data as longitudinal data for further comparison
+MST_r <- reshape(MST,direction = 'long',
+               varying = c('Pretest','Posttest_Time1','Posttest_Time2','Posttest_Time3'),
+               timevar='test time',
+               times=c('pretest','posttest1','posttest2','posttest3'),
+               v.names='students score',
+               idvar='ID')
+MST_r$School=as.factor(MST_r$School)
+MST_r$Intervention=factor(MST_r$Intervention, levels=c('0', '1'),labels=c('Control','Treatment'))
+
+# Have a brief view about the value distribution
+f=ggplot(MST_r, aes(x = `test time`, y = `students score`,fill=Intervention)) + geom_boxplot()+ggtitle('Fig.8 Score Distribution Accross the Time after Intervention') + theme(plot.title = element_text(hjust = 0.2))
+# Looking at the average value
+g=ggplot(MST_r, aes(x = `test time`, y = `students score`,fill=Intervention)) +geom_bar(stat="identity",position = "dodge")+ggtitle('Fig.9 Average Scores Accross the Time after Intervention') + theme(plot.title = element_text(hjust = 0.5))
+# Combine multiple graphs together
+ggarrange(a,b,c,d,e,nrow=3,ncol=2)
+ggarrange(f,g,nrow=2,ncol=1)
+```
+
+# Method Disscussion
+Since both ‘Intervention’ and ‘School’ parameters might influence student’s test results, it is vital to design a hierarchical structure that primarily straightens out the causal relationship among variables through theoretical background in terms of classifying lower and upper levels, then decompose the intra-class or inter-class randomness occurred in slopes and intercepts to evaluate whether the chosen metrics are significantly meaningful for cases. Several research stated the educational level of the original school can interfere with the student's exam by allocating more facilities and teacher resources [@doi:10.1177/1098300719857185], so it is recommended to build two types of models for answering the following questions:
+
+Q1: Did school affect students’ test scores in both hardware and soft service?  
+Q2: Did teacher’s hard-working influence pupil’s scores under the condition of school environment?  
+
+Included two-level hierarchies, Question 1’s model hence is constructed by setting time-series data *t* as the explanatory predictor at the lower level, school data *s* as upper-class intermediary variable, and time-series data *t+1* as the outcome, connected by linear mixed-effect regression. To detect the intra-class variability within school-time relationship, it is assumed that both intercept and slope are selected from a normal distribution by unknown means *a* and *b*, illustrating as formula when *u* and *v* considered as random effects drawn from normal distribution:
+$$Lower\ Level: t+1=a_j +b_j*t+\epsilon$$
+$$ Upper\ Level: a_j=a+u_j\quad b_j=b+v_j\quad u_j \sim N(0,\sigma_v^2)\ and \ v_j \sim N(0,\sigma_u^2)$$
+It is though still uncertain that how lower-level variables have explained the outcome, intra-class Correlation Coefficient test (ICC) interprets this process indirectly through comparing the proportion of grouping variable’s variance (school factor) on the total variance in random effects, which specifically concentrates on the correlation of two random drawn variables within the same group [@https://doi.org/10.1111/j.1751-5823.2011.00159].
+$$ ICC=\frac{\sigma_{u}^2}{\sigma_{u}^2+\sigma_{e}^2}$$
+Modelling Q2 is more complex when the Michael (2008) suggested the intervention of teaching quality should be added between scores and school environment as he concentrated treatment difference within the same school, rather than how treatment affect students from different academic backgrounds. Intervention thus acted as a mediator between time and school, which means that additional covariates need to be considered in the random effects. These covariates can account for grouping differences when randomisation occurs by measuring how the low-level predictors affect the variance of the entire model: if these variables successfully account for the variance, the effect on the responses will increase. In this case, intervention is given a coefficient *c*, and a low-level covariate is given *i* , while a high-level covariate is denoted *r* in the new model formula, modified on the basis of Q1’s model.
+$$Lower\ Level: Score=overall\ intercept(a_j) +b_j*school+c_j*intervention+\epsilon$$
+$$ Upper\ Level: a_j=a+u_j\quad b_j=b+v_j\quad c_j=c+o_j\quad u_j \sim N(0,\sigma_v^2) \ v_j \sim N(0,\sigma_u^2)\  o_j \sim N(0,\sigma_o^2)$$
+However, excessive cross-level interactions have been considered if all variables' influence were included, which still needs dimension reduction for having a clear look in individual scores level or intervention level through comparing the proportion of predictor/intermediate's variance change under the random effects of entire model. Therefore, ICC and Variance partition coefficients (VPC), which is a local-version of ICC, could still be applied through adding conditional restrictions for detailed exploration.
+The entire modelling structure could be seen at Fig.10.
+$$ VPC=\frac{\sigma_{u}^2+\sigma_{v}^2}{\sigma_{u}^2+\sigma_{v}^2+\sigma_{e}^2}$$
+```{r pressure, echo=FALSE, out.width = '100%'}
+knitr::include_graphics("C:/Users/ky002/Desktop/Dickens/Postgraduate/Second Term/Multilevel Modelling/Assignment/Summative/model structure.png")
+```
+
+# Model Analysis
+## Q1 Model
+It is appropriate to apply Linear-Fixed Effect Model when solving multilevel questions, which instructs three models setting intercept and predictors as fixed effects, and their impacts on school level as random noises, separately constructed in pairs through the time sequence. This type of linear model assumed that each observation is independent to the others, which was validated since the strict exam invigilation that it is impossible of dependency from cheating. Additionally, it is believed that the model residuals are normally distributed[@https://doi.org/10.1111/2041-210X.13434], validating through Shapiro-Wilk test, which is suitable for model owning below 5,000 samples. Denoting the significant level *alpha* at 0.10, only the model measured score change from Time1 to Time2 was qualified since its the distribution of random effects surround with y=x line, compared with the other two models (see Fig.11).  
+ 
+
+$$ lmer(Time\ 2 =Intercept+Time\ 1+(Intercept+Time\ 1|School)$$
+Through the summary of this model, it is obvious the random effects are strongly negatively correlated (-1.00) that a great score at time 1 might not help to earn more points at time 2, proofing by the 95% confidence interval estimates of standard deviance in random effects, the coefficient of intercept is 90-times larger than time 1’s if taking the maximum observations under the consideration of school intermediates *(intercept: [0,26.9], post time 1: [0,0.29])*. 
+
+Another capable method of evaluation is naive ICC, which decompose the group variance in random effects through highlighting what variance on intercept can contribute to the whole variance, which is 0.99 in this case, showing that nearly all variance change at time 2 resides on the school level, which confirms that educational environment of school really matters (Fig 12 & 13 provide a cogent visualisation about what schools influence on student's scores). 
+
+```{r echo=FALSE,results='hide',message=FALSE, warning=FALSE}
+MST$Intervention=as.factor(MST$Intervention)
+MST$School=as.factor(MST$School)
+Model_1_2=lmer(Posttest_Time2 ~1+Posttest_Time1+(1+Posttest_Time1|School),data=MST)
+summary(Model_1_2)
+confint(Model_1_2,oldNames=FALSE)
+
+#validation about the assumption
+shapiro.test(resid(Model_1_2))
+# Check random effect
+qqnorm(ranef(Model_1_2)$School[,1])
+qqline(ranef(Model_1_2)$School[,1],col='red')
+
+plot_model(Model_1_2, type="re",colors='Set2', title='Fig.12 Random Effect in Both Lower and Upper Levels')
+
+#Test model's ICC
+summary(Model_1_2)$varcor
+
+ICC=6.38817^2/(6.38817^2+0.05402^2)
+print(c('ICC Values In Time1 to Time2 Periods:',ICC))
+
+MST$pred1=predict(Model_1_2)
+ggplot(MST, aes(x= Posttest_Time1, y = Posttest_Time2, col = School, group = School))+geom_line(aes(y=pred1, group=School, col=School))+ggtitle('Fig.13 Average Scores Across the Time after Intervention') + theme(plot.title = element_text(hjust = 0.2))
+```
+
+## Q2's Model
+Considered the intra-class interaction between time and school, it is recommended to measure the inter-class perspective of intervention and time, and randomness on intercepts and slopes on how both intervention and time will explain in the school level together. A full linear model with cross-level interaction thus has been built, which is also assumed by applying independent observation and normally distributed residual errors, so information of time 1 to time 2 is reserved. In the new model summary, it is apparent that both received marks at time 1 and treatment of teacher’s hardworking have slight influence on the next exam on the perspective of fixed effects, even the high marks gained in the first time might help students to get lower marks in the next exam when they are taught by profound tutors (coef: -0.039 without considering school aspects). Similar situations happened on the random effects: 28.8 variance change done by intervention, which is comparably significant when compared with only 0.01 variance change contributed by time 1. To explore what proportion of the total variance is attributable to variation within-groups, VPC is suggested to apply on measuring the percentage variation components of the total at separate level [@https://doi.org/10.1111/j.1467-985X.2004.00365.x]. VPC on level of Intervention level or time 1 achieved 28.81 and 0.01 respectively, which means both explanatory variables have slight interaction on explaining the outcome comparing with school variable. Therefore, ICC might be relatively meaningful that evaluates the homogeneity of explanatory predictors and the response variables within a given cluster. In this case, when the students studied at the same school, who gained the same scores at time 1 will have a slight decrease in marks after taking exam 2 (r=-0.0039) without considering the intervention. When treatment and placebo are accepted by participants, all students might have a lower score at the next exam (r=-0.1012), and it will also happen on the students who had same scores at time 1 and accepted treatment, showing that the interaction between time 1 score and intervention is insignificant on the perspective of school level. Therefore, the teacher's efforts on the education level are effective but not important compared to school environment, and their efforts might have negative impact on student's marks from time 1 to time 2.
+
+$$ lmer(Time\ 2=Time\ 1+Intervention+Time\ 1:Intervention+(Time\ 1+Intervention|School)$$
+```{r echo=FALSE,results='hide',message=FALSE, warning=FALSE}
+triple_1=lmer(Posttest_Time2~Posttest_Time1+Intervention+Posttest_Time1:Intervention+(Posttest_Time1+Intervention|School),data=MST)
+summary(triple_1)
+```
+```{r echo=FALSE}
+randomeffect=as.data.frame(VarCorr(triple_1))
+randomeffect
+#VPC estimate
+vpc.intervention=randomeffect[3,4]/(sum(randomeffect[,4]))
+
+vpc.pastscore=(randomeffect[2,4])/(sum(randomeffect[,4]))
+
+#ICC estimate
+icc.pastscore=randomeffect[4,4]/(sum(randomeffect[,4]))
+icc.intervention_pastscore=randomeffect[5,4]/(sum(randomeffect[,4]))
+icc.intervention_all= (randomeffect[5,4]+randomeffect[6,4])/(sum(randomeffect[,4]))
+
+print(c('VPC on Intervention or PastScore :', vpc.intervention,vpc.pastscore))
+print(c('VPC on PastScore :', icc.pastscore))
+print(c('ICC on Intervention :', icc.intervention_pastscore))
+print(c('VPC on Intervention on Both Intervention And Pastscore :',icc.intervention_all))
+```
+# Discussion of Model's Drawback
+Although both analysis and discussion of the models are settled, it is honest that both models are
+statistically inaccurate because the data used do not fully satisfy the assumptions of the linear mixed-effects model, which may severely affect the calculation accuracy of the random effects coefficient. According to the study of the LME hypothesis [@https://doi.org/10.1111/2041-210X.13434], the response variable ‘Post_Time 2’ should be reasonably symmetric under normal distribution, but it is proofed by having right-skewed pattern during the EDA section. In addition, naive ICC might cause overestimation about the percentage of researched variable's variance change because it absorbs the estimate error from random slopes, which means the effects of intervention or marks should be slighter than what has concluded.
+
+# Conclusion
+In conclusion, it is interesting that school attribute has magnificent influence on student's academic achievement whether there is a short-term educational helping or not. Under the condition of studying in the same school, there is not a significant difference between pupils who are under treatment and their friends in control group, and something self-study might have better results compared with passive learning from hard-working teachers. These opinions only apply from time 1 to time 2, and the real effect of educational intervention needs to be observed in more data.
+
+```{r echo=FALSE,message=FALSE, warning=FALSE}
+library(wordcountaddin)
+word_count()
+text_stats()
+```
+
+# Reference List
+
