@@ -1,0 +1,160 @@
+---
+title: "Rebuild the model"
+date: "December 24th 2022"
+output: pdf_document: default
+---
+```{r include=FALSE}
+# All packages would be used in this assignment are listed and described
+require(mice) # To check whether there are any missing values
+require(reshape2) # To create longitudinal data for comparing repeated data
+require(ggplot2) # To create visualization
+require(egg) # To combine multiple visualization
+require(lme4) # Use linear mixed-effect model
+require(sjPlot) # Visualise the random effect in level-2 model
+require(performance)
+require(lmerTest)
+options(scipen=999)
+```
+
+```{r include=FALSE}
+MST=read.csv("https://www.maths.dur.ac.uk/users/jochen.einbeck/Data/mst1.csv", header=TRUE)
+attach(MST)
+# print all column names and observations
+colnames(MST)
+print(c('Sample Number is :',dim(MST)[1]*dim(MST)[2]))
+# To check whether there are any missing values inside the dataframe
+print(c('the number of non-value data :', sum(is.na(MST))))
+# To have a brief look about the variable distribution
+summary(MST)
+md.pattern(MST,plot=T,rotate.names = T)
+```
+
+```{r echo=FALSE}
+# try to find the one-by-one relationships among variables (only the numberic information can be compared)
+pairs(MST[,c("Posttest_Time1","Posttest_Time2","Posttest_Time3","Pretest")])
+# Try to find the covariance of four time-series data through sequence
+print (c('correlation between pretest and posttest 1 :',cor(Pretest,Posttest_Time1, method='spearman')))
+print (c('correlation between posttest 1 and posttest 2 :',cor(Posttest_Time1,Posttest_Time2, method='spearman')))
+print (c('correlation between posttest 2 and posttest 3 :',cor(Posttest_Time2,Posttest_Time3, method='spearman')))
+# To check whether the data columns are normally distributed
+a=ggplot(data=MST, aes(log(Pretest))) + geom_histogram(bins=15)+ggtitle('Fig.3 Score Distribution at Pre Time') + theme(plot.title = element_text(hjust = 0.5))
+b=ggplot(data=MST, aes(log(Posttest_Time1))) + geom_histogram(bins=15)+ggtitle('Fig.4 Score Distribution at Post Time 1') + theme(plot.title = element_text(hjust = 0.5))
+c=ggplot(data=MST, aes(Posttest_Time2)) + geom_histogram(bins=15)+ggtitle('Fig.5 Score Distribution at Post Time 2') + theme(plot.title = element_text(hjust = 0.5))
+d=ggplot(data=MST, aes(Posttest_Time3)) + geom_histogram(bins=15)+ggtitle('Fig.6 Score Distribution at Post Time 3') + theme(plot.title = element_text(hjust = 0.5))
+intevention=data.frame(table(MST$Intervention)) 
+colnames(intevention)=c("treatment", "frequency")
+e=ggplot(data=intevention, aes(x=factor(treatment,levels=c('0', '1'),labels=c('Control','Treatment')), y=frequency)) + geom_bar(stat="identity")+labs(x = "Intervention")+ggtitle('Fig.7 Score Distribution under Intervention') + theme(plot.title = element_text(hjust = 0.2))
+# Considered post time from one to three and pre time data as longitudinal data for further comparison
+MST_r <- reshape(MST,direction = 'long',
+               varying = c('Pretest','Posttest_Time1','Posttest_Time2','Posttest_Time3'),
+               timevar='test time',
+               times=c('pretest','posttest1','posttest2','posttest3'),
+               v.names='students score',
+               idvar='ID')
+MST_r$School=as.factor(MST_r$School)
+MST_r$Intervention=factor(MST_r$Intervention, levels=c('0', '1'),labels=c('Control','Treatment'))
+
+# Have a brief view about the value distribution
+f=ggplot(MST_r, aes(x = `test time`, y = `students score`,fill=Intervention)) + geom_boxplot()+ggtitle('Fig.8 Score Distribution Accross the Time after Intervention') + theme(plot.title = element_text(hjust = 0.2))
+# Looking at the average value
+g=ggplot(MST_r, aes(x = `test time`, y = `students score`,fill=Intervention)) +geom_bar(stat="identity",position = "dodge")+ggtitle('Fig.9 Average Scores Accross the Time after Intervention') + theme(plot.title = element_text(hjust = 0.5))
+# Combine multiple graphs together
+ggarrange(a,b,c,d,e,nrow=3,ncol=2)
+ggarrange(f,g,nrow=2,ncol=1)
+```
+```{r echo=FALSE,results='hide',message=FALSE, warning=FALSE}
+# Question 1: Do school influence the student's scores?  
+MST$Intervention=as.factor(MST$Intervention)
+MST$School=as.factor(MST$School)
+
+MODEL_0=lmer(Posttest_Time3 ~ 1+(1|School),data=MST)
+summary(MODEL_0)
+
+MODEL_1=lmer(Posttest_Time3 ~ 1+Posttest_Time1+(1|School),data=MST)
+summary(MODEL_1)
+anova(MODEL_0,MODEL_1)
+
+deviance_check=function(model1,model2){
+  if (abs(deviance(model1)-deviance(model2))<=qchisq(0.95,1)){
+  print('There is no needs to keep the random slope of the new model since there is an acceptable difference with the old one')
+} else {
+  print('Keep the random slope of the new model')}
+}
+deviance_check(MODEL_0,MODEL_1)
+
+# It seems that the there is a little difference of adding the intervention factor on intercept, so I should put post test score into consideration.
+
+MODEL_2=lmer(Posttest_Time3 ~ 1+Posttest_Time1+Posttest_Time2+(1|School),data=MST)
+summary(MODEL_2)
+anova(MODEL_1,MODEL_2)
+deviance_check(MODEL_1,MODEL_2)
+
+MODEL_3=lmer(Posttest_Time3 ~ 1+Posttest_Time1+Posttest_Time2+(1+Posttest_Time1+Posttest_Time2|School),data=MST)
+summary(MODEL_3)
+anova(MODEL_2,MODEL_3)
+# the new model is acceptable
+
+MODEL_4=lmer(Posttest_Time3 ~ 1+Posttest_Time1*Posttest_Time2+(1+Posttest_Time1+Posttest_Time2|School),data=MST)
+summary(MODEL_4)
+ranova(MODEL_4)
+#drop Posttest_Time2 in the random slope
+
+MODEL_5=lmer(Posttest_Time3 ~ 1+Posttest_Time1*Posttest_Time2+(1+Posttest_Time1|School),data=MST)
+summary(MODEL_5)
+ranova(MODEL_5)
+
+MODEL_6=lmer(Posttest_Time2 ~ 1+Posttest_Time1+(1+Posttest_Time1|School),data=MST)
+summary(MODEL_6)
+ranova(MODEL_6)
+
+# It is clear to see that post time 1st scores have negative correlation with the 3rd scores (without intervention), while the 2nd scores are positive correlated with the final results
+
+# Both models have less influence on the random effect of slope under the condition of school
+```
+```{r}
+plot_model(MODEL_5, type="re",colors='Set2', title='Random Effect in Both Lower and Upper Levels')
+plot_model(MODEL_6, type="re",colors='Set2', title='Random Effect in Both Lower and Upper Levels')
+# the variance of school shrinks from 40.808697 to 5.53156895
+```
+
+```{r echo=FALSE,results='hide',message=FALSE, warning=FALSE}
+MST$pred1 <- predict(MODEL_6)
+MST$pred2 <- predict(MODEL_5)
+
+ggplot(MST, aes(x= Posttest_Time1, y = Posttest_Time2, col = School, group = School))+geom_line(aes(y=pred1, group=School, col=School))+ggtitle('Fig.13 Average Scores Across the Time after the First Test') + theme(plot.title = element_text(hjust = 0.2),legend.key.size = unit(5, 'mm'))
+
+ggplot(MST, aes(x= Posttest_Time2, y = Posttest_Time3, col = School, group = School))+geom_line(aes(y=pred2, group=School, col=School))+ggtitle('Fig.13 Average Scores Across the Time after the Second Test') + theme(plot.title = element_text(hjust = 0.2),legend.key.size = unit(5, 'mm'))
+
+# Therefore, it is clear that the something happened between second and the third tests, which has offset the difference inherited by the school.
+
+```
+
+```{r}
+# I should consider intervention into the model
+MODEL_7=lmer(Posttest_Time3 ~ 1+Posttest_Time1*Posttest_Time2+(1+Posttest_Time1+Posttest_Time2|Intervention),data=MST)
+summary(MODEL_7)
+ranova(MODEL_7)
+
+# Under the random effect of intervention, the variance of 2nd scores is great than the 1st ones, which means that intervention has helped students to increase their marks. And the fixed effects tell that the students who got  higher marks in the second tests will get more higher marks in the final compared to students who got higher marks in the first test. 
+
+MST$pred3 <- predict(MODEL_7)
+
+ggplot(MST, aes(x= Posttest_Time1, y = Posttest_Time2, col = School, group = School))+geom_line(aes(y=pred3, group=School, col=School))+ggtitle('Fig.13 Average Scores Across the Time after the First Intervention') + theme(plot.title = element_text(hjust = 0.2),legend.key.size = unit(5, 'mm'))
+
+ggplot(MST, aes(x= Posttest_Time2, y = Posttest_Time3, col = School, group = School))+geom_line(aes(y=pred3, group=School, col=School))+ggtitle('Fig.13 Average Scores Across the Time after the Second Intervention') + theme(plot.title = element_text(hjust = 0.2),legend.key.size = unit(5, 'mm'))
+
+```
+```{r}
+MODEL_8=lmer(Posttest_Time3 ~ 1+Posttest_Time1*Posttest_Time2*Intervention+(Intervention|School)+(Posttest_Time1+Posttest_Time2|Intervention),data=MST)
+summary(MODEL_8)
+
+plot_model(MODEL_8, type="re",colors='Set2', title='Random Effect in Both Lower and Upper Levels')
+MST$pred4 <- predict(MODEL_8)
+
+ggplot(MST, aes(x= Posttest_Time1, y = Posttest_Time2, col = School, group = School))+geom_line(aes(y=pred4, group=School, col=School))+ggtitle('Fig.13 Average Scores Across the Time after the First Test') + theme(plot.title = element_text(hjust = 0.2),legend.key.size = unit(5, 'mm'))
+
+ggplot(MST, aes(x= Posttest_Time2, y = Posttest_Time3, col = School, group = School))+geom_line(aes(y=pred4, group=School, col=School))+ggtitle('Fig.13 Average Scores Across the Time after the Second Test') + theme(plot.title = element_text(hjust = 0.2),legend.key.size = unit(5, 'mm'))
+# In random effect, it is seemed that intervention can make students get higher marks, but it is not strong than the influence of school difference.
+#Also, it is seemed that intervention can help students who got higher scores at second test to performance better at the end of the test
+```
+
